@@ -7,33 +7,76 @@ library(scales)
 
 playoff_seeds <- function(div_standings, team_game_data) {
   div_winners <- division_winners(div_standings, team_game_data)
-  #conf_div_winners_seeded <- get_conf_div_winners_seeds(div_winners, team_game_data)
-  return(div_winners)
+  conf_div_winners <- conf_seed(div_winners)
+
+  in_the_hunt <- get_non_div_winners(div_standings, team_game_data)
+  wc_seeds <- wc_seed(in_the_hunt)
+  final_conf_standings <- final_standings(conf_div_winners, wc_seeds)
+
+  
+  return(final_conf_standings)
 }
+
+
 
 division_winners <- function(div_standings, team_game_data) {
   div_winners <- lapply(div_standings, function(df) {
     df[df$div_rank == 1, ]
   })
   div_winners <- do.call(rbind, div_winners)
-  conf_div_winners <- split_by_conf(div_winners)
+  return(div_winners)
+}
+
+conf_seed <- function(teams) {
+  conf_teams <- split_by_conf(teams)
+  #print(conf_teams)
+  for(conf in names(conf_teams)) {
+    conf_df <- conf_teams[[conf]]
+    conf_df <- team_sort(conf_df, team_game_data)
+    conf_teams[[conf]] <- conf_df %>%
+      arrange(desc(pct), wc_tiebreaker_rank) %>%
+      mutate(wc_rank = (row_number()))
+  }
+  return(conf_teams)
+}
+
+wc_seed <- function(teams) {
+  ranked <- conf_seed(teams)
+  for (conf in names(ranked)) {
+    conf_df <- ranked[[conf]]
+    ranked[[conf]] <- ranked[[conf]] %>% mutate(wc_rank = (wc_rank + n_distinct(conf_df$div)))
+  }
+  return(ranked)
+}
+
+final_standings <- function(conf_div_winners, wc_seeds) {
+  standings <- list()
   
   for(conf in names(conf_div_winners)) {
-
-    conf_div_winners[[conf]] <- team_sort(conf_div_winners[[conf]], team_game_data)
-    conf_div_winners[[conf]] <- conf_div_winners[[conf]] %>%
-      arrange(desc(pct), wc_tiebreaker_rank) %>%
-      mutate(wc_rank = row_number())
+    
+    combined <- rbind(conf_div_winners[[conf]], wc_seeds[[conf]])
+    
+    standings[[conf]] <- arrange(combined, wc_rank)
   }
-  return(conf_div_winners)
   
+  return(standings)
+}
 
+
+
+
+get_non_div_winners <- function(div_standings, team_game_data) {
+  in_the_hunt <- lapply(div_standings, function(df) {
+    df[df$div_rank != 1, ]
+  })
+ in_the_hunt <- do.call(rbind, in_the_hunt)
+ return(in_the_hunt)
 }
 
 split_by_conf <- function(teams) {
-  afc_div_winners <- teams[teams$conf == "AFC",]
-  nfc_div_winners <- teams[teams$conf == "NFC",]
-  return(list(AFC = afc_div_winners, NFC = nfc_div_winners))
+  afc_teams <- teams[teams$conf == "AFC",]
+  nfc_teams <- teams[teams$conf == "NFC",]
+  return(list(AFC = afc_teams, NFC = nfc_teams))
 }
 
 division_standings <- function(divisions, team_game_data) {
@@ -240,6 +283,7 @@ common_opponents <- function(teams, team_game_data) {
   for (i in 1:nrow(teams)) {
     team_abbr <- teams$team_abbr[i]
     team_df <- team_game_data[[team_abbr]]
+    team_df <- team_df[!is.na(team_df$result), ]
     opponents[[team_abbr]] <- unique(team_df$opponent)
   }
   return(Reduce(intersect, opponents))
@@ -264,10 +308,10 @@ common_games <- function(teams, team_game_data) {
     losses <- sum(relevant_games$result == "Loss", na.rm = TRUE)
     ties <- sum(relevant_games$result == "Tie", na.rm = TRUE)
     record <- (wins + .5*ties) / (losses+wins+ties)
-    print(team)
-    print(record)
+    #print(team)
+    #print(record)
     tmdf$cg_rec[i] <- record
-    print(tmdf[i])
+    #print(tmdf[i])
     #results[i] <-  data.frame( team, record))
   }
   #max_record <- max(results$record)
@@ -285,13 +329,13 @@ conf_record <- function(teams, team_game_data) {
 
 s_o_v <- function(teams, team_game_data) {
   max_sov <- max(teams$SoV)
-  results <- teams[teams$SoV == max_sov]
+  results <- teams[teams$SoV == max_sov, ]
   return(results)
 }
 
 s_o_s <- function(teams, team_game_data) {
   max_sos <- max(teams$SoS)
-  results <- teams[teams$SoS == max_sos]
+  results <- teams[teams$SoS == max_sos, ]
   return(results)
 }
 
@@ -415,18 +459,24 @@ tiebreaker <- function(teams, team_game_data, sort_type) {
 }
 
 div_check <- function(teams, team_game_data) {
+  #print(teams)
   if (n_distinct(teams$div) == length(teams$div)) {
     return(teams)
   } else {
+    
     
     div_split <- split(teams, teams$div)
     top_teams <- list()
     for (div in names(div_split)) {
       ranked <- div_split[[div]] %>%
         arrange((div_rank))
-      top_team[div] <- ranked[1,]
+      #print(ranked[1,])
+      top_team <- ranked[1,]
+      #print(top_teams[[div]])
+      
       
       top_teams <- rbind(top_teams, top_team)
+      #print(top_teams)
     }
     return(teams)
 }}
@@ -437,22 +487,15 @@ team_sort <- function(teams, team_game_data) {
     teams <- teams %>% arrange(desc(pct))
     return(teams)
   } 
-  
-  # unique_wins <- unique(teams$wins)
-  # unique_losses <- unique(teams$losses)
-  # if (length(unique_wins) == length(teams$wins) & length(unique_losses) == length(teams$losses)) {
-  #   teams <- teams %>% arrange(desc(pct))
-  #   return(teams)
-  # }
+
   unique_wins <- unique(teams$record)
   repeat {
     tiebreaker_applied <- FALSE
   
     for (record in unique_wins) {
-      if (n_distinct(teams$record) == 1) {
+      if (n_distinct(teams[teams$record == record, ]) == 1) {
         next
-      }
-      if (n_distinct(teams$div) != 1) {
+      } else if (n_distinct(teams$div) != 1) {
         sort_type <- "wc"
       } else {
         sort_type <- "div"
@@ -467,7 +510,7 @@ team_sort <- function(teams, team_game_data) {
         tie_winner <- tiebreaker(tied_teams, team_game_data, sort_type)
         teams[teams$team_abbr %in% tie_winner$team_abbr, rank_col] <- rank
         teams[teams$team_abbr %in% tie_winner$team_abbr, flag_col] <- tie_winner$tiebreaker_flag
-        tied_teams <- teams[teams$record == record & is.na(teams$rank_col), ] #teams dataframe includes teams not in the tie
+        tied_teams <- teams[teams$record == record & is.na(teams[[rank_col]]), ] #teams dataframe includes teams not in the tie
         tiebreaker_applied <- TRUE
         rank = rank+1
         if (nrow(tied_teams) ==1) {
@@ -516,6 +559,8 @@ get_divs <- function(teamSeasonData) {
   return(split(teamSeasonData, teamSeasonData$div))
 }
 
+
+
 #main()
 # Load schedules and team data
 nflData <- load_nfl_data()
@@ -528,4 +573,5 @@ divs <- get_divs(teamSeasonData)
 div_standings <- division_standings(divs, team_game_data)
 # Get playoff seeds
 playoff_standings <- playoff_seeds(div_standings, team_game_data)
+
 
