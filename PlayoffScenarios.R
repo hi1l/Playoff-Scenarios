@@ -187,17 +187,103 @@ team_sort <- function(teams, team_game_data) {
 }
 
 
+library(tidyverse)
+library(ggrepel)
+
+library(dplyr)
+library(purrr)
+
+
+calc_sos_sov <- function(nflScheduleData, nflTeamsInfo, teamSeasonData, team_game_data) {
+  teamSeasonData <- map_dfr(names(teamSeasonData), function(team_abbr) {
+    team_games <- team_game_data[[team_abbr]]
+    completed_games <- filter(team_games, !is.na(result))
+    
+    sos <- sum(sapply(completed_games$opponent, function(opp) teamSeasonData[[opp]]$wins), na.rm = TRUE)
+    sov_w <- sum(sapply(completed_games$opponent[completed_games$result == "Win"], function(opp) teamSeasonData[[opp]]$wins), na.rm = TRUE)
+    sov_l <- sum(sapply(completed_games$opponent[completed_games$result == "Win"], function(opp) teamSeasonData[[opp]]$losses), na.rm = TRUE)
+    sov <- ifelse(sov_l + sov_w > 0, sov_w / (sov_l + sov_w), 0)
+    
+    team_data <- teamSeasonData[[team_abbr]]
+    team_data$SoS <- sos
+    team_data$SoV <- sov
+    
+    return(team_data)
+  })
+  
+  return(teamSeasonData)
+}
+
+calculate_win_loss_ties <- function(team_df) {
+  wins <- sum(team_df$result == "Win", na.rm = TRUE)
+  losses <- sum(team_df$result == "Loss", na.rm = TRUE)
+  ties <- sum(team_df$result == "Tie", na.rm = TRUE)
+  
+  adjusted_wins <- wins + 0.5 * ties
+  adjusted_losses <- losses + 0.5 * ties
+  
+  return(list(wins = adjusted_wins, losses = adjusted_losses, ties = ties))
+}
+
+calcTeamStats <- function(nflScheduleData, nflTeamsInfo, team_game_data) {
+  teamSeasonData <- map(names(team_game_data), function(team_abbr) {
+    team_df <- team_game_data[[team_abbr]]
+    
+    
+    
+    overall <- calculate_win_loss_ties(team_df)
+    conf_rec <- calculate_win_loss_ties(team_df %>% filter(conference_game))
+    div_rec <- calculate_win_loss_ties(team_df %>% filter(div_game))
+
+    team_summary <- tibble(
+      team_abbr = team_abbr,
+      conf = nflTeamsInfo$team_conf[nflTeamsInfo$team_abbr == team_abbr],
+      div = nflTeamsInfo$team_division[nflTeamsInfo$team_abbr == team_abbr],
+      wins = overall[["wins"]], 
+      losses = overall[["losses"]],
+      pct = percent(overall[["wins"]] / (overall[["wins"]] + overall[["losses"]])),
+      conf_wins = conf_rec[["wins"]],
+      conf_losses = conf_rec[["losses"]],
+      conf_pct = percent(conf_rec[["wins"]] / (conf_rec[["wins"]] + conf_rec[["losses"]])),
+      div_wins = div_rec[["wins"]],
+      div_losses = div_rec[["losses"]],
+      div_pct = percent(div_rec[["wins"]] / (div_rec[["wins"]] + div_rec[["losses"]]))
+    )
+    
+    
+    
+    return(team_summary)
+  })
+  
+  teamSeasonData <- calc_sos_sov(nflScheduleData, nflTeamsInfo, teamSeasonData, team_game_data)
+  #teamSeasonData2= <- calc_sos_sov2(nflScheduleData, nflTeamsInfo, teamSeasonData, team_game_data)
+  
+  # Combine all summaries into a single DataFrame
+  # teamSeasonData <- do.call(rbind, teamSeasonData)
+  
+  teamSeasonData <- teamSeasonData %>%
+    mutate(div_rank = NA_integer_,  # Add division ranking
+           div_tiebreaker_rank = NA_integer_,  # Add empty tiebreaker rank
+           div_tiebreaker_flag = NA_character_,
+           wc_rank = NA_integer_,  # Add division ranking
+           wc_tiebreaker_rank = NA_integer_,  # Add empty tiebreaker rank
+           wc_tiebreaker_flag = NA_character_)   # Add empty tiebreaker flag)   # Add empty tiebreaker flag
+  
+  return(teamSeasonData)
+}
 
 
 
 
 #main()
+x<-0
 # Load schedules and team data
 nflData <- load_nfl_data()
 # Get game by game data for each team
 team_game_data <- byTeamGameData(nflData$schedule, nflData$teams)
 # Get record and other stats for each team
 teamSeasonData <- calcTeamStats(nflData$schedule, nflData$teams, team_game_data)
+teamSeasonData2 <- calcTeamStats(nflData$schedule, nflData$teams, team_game_data)
 # get division standings
 #divs <- get_divs(teamSeasonData)
 div_standings <- division_standings(split(teamSeasonData,teamSeasonData$div), team_game_data)
