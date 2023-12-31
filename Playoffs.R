@@ -1,5 +1,5 @@
 
-rm(list = ls())
+
 
 library(tidyverse)
 library(ggrepel)
@@ -54,7 +54,6 @@ division_standings <- function(teams, team_game_data) {
   for (division in names(divisions)) {
     div <- divisions[[division]]
     div <- team_sort(div, team_game_data) #sorted_division_df
-    
     div <- div %>%
       arrange(desc(pct), div_tiebreaker_rank, .by_group = TRUE) %>%
       mutate(div_rank = row_number())
@@ -388,7 +387,7 @@ create_team_df <- function(team_name, games_with_conf) {
       conference_game = home_team_conf == away_team_conf,
       div_game = home_team_div == away_team_div
     ) %>%
-    select(week, opponent, result, conference_game, div_game, gameday)
+    select(game_id, week, opponent, result, conference_game, div_game, gameday)
   
   return(team_games)
 }
@@ -507,6 +506,7 @@ calcTeamStats <- function(nflScheduleData, nflTeamsInfo, team_game_data) {
     remaining_games <- sum(team_df$gameday >= Sys.Date())
     remaining_conf_games <- sum(team_df$gameday >= Sys.Date() & team_df$conference_game)
     remaining_div_games <- sum(team_df$gameday >= Sys.Date() & team_df$div_game)
+    remaining_games_id <- team_df$game_id[team_df$gameday < Sys.Date()]
     
     # Creating the team summary table
     tibble(
@@ -518,7 +518,7 @@ calcTeamStats <- function(nflScheduleData, nflTeamsInfo, team_game_data) {
       div_wins = div_rec$wins, div_losses = div_rec$losses, div_pct = div_rec$pct,
       #opps = opponents, 
       past_opps = list(past_opponents), future_opps = list(future_opponents), sov_opps = list(sov_opponents),
-      remaining_games, remaining_conf_games, remaining_div_games
+      remaining_games, remaining_conf_games, remaining_div_games, remaining_games_id = list(remaining_games_id)
     )
   })
   
@@ -594,6 +594,8 @@ calc_sos_sov <- function(teamSeasonData, team_game_data) {
 # print(paste("teamSeasonData function took", teamSeasonData_time["elapsed"], "seconds"))
 # print(paste("div_Standings function took", divStandings_time["elapsed"], "seconds"))
 # print(paste("playoff function took", playoff_time["elapsed"], "seconds"))
+
+
 # Load schedules and team data
 nflData <- load_nfl_data()
 
